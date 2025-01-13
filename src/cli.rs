@@ -9,7 +9,7 @@ pub struct Cli {
 
 #[derive(Debug, Subcommand)]
 pub enum Commands {
-	Page {
+	Cat {
 		filename: Option<String>,
   
 		#[arg(short = 'd')]

@@ -1,7 +1,7 @@
-use std::{fs::{self, File}, io::{BufRead, BufReader}, path::PathBuf, str::FromStr};
+use std::{fs::{self, File}, io::{self, BufReader, Read}, path::PathBuf, str::FromStr};
 
 use anyhow::Result as Res;
-use csv::StringRecord;
+use csv::{Position, Reader, StringRecord};
 
 use crate::error::AppError;
 
@@ -25,15 +25,17 @@ pub fn run(filename_option: &Option<String>, passed_delimiter: &Option<char>, no
 		}
 		let delimiter = get_delimiter_u8(delimiter)?;
 
+		let f = File::open(&path)?;
+		let reader = BufReader::new(f);
 		let file_size = fs::metadata(&path)?.len();
 		if file_size > BIG_FILE_LIMIT {
-			parse_big_file(&path, delimiter)
+			parse_big_file(reader, delimiter, !no_header)
 		} else {
-			parse_small_file(&path, delimiter, !no_header)
+			parse_small_file(reader, delimiter, !no_header)
 		}
 	} else {
 		let delimiter = get_delimiter_u8(delimiter)?;
-		parse_stdin(delimiter)
+		parse_small_file(io::stdin(), delimiter, !no_header)
 	}
 }
 
@@ -54,16 +56,71 @@ fn get_delimiter_from_filename(filename: &str) -> Option<char> {
 	None
 }
 
-fn parse_small_file(path: &PathBuf, delimiter: u8, has_header: bool) -> Res<()> {
-	let f = File::open(path)?;
-	let reader = BufReader::new(f);
+fn parse_small_file<R: Read>(reader: R, delimiter: u8, has_header: bool) -> Res<()> {
+	let mut csv_reader = get_csv_reader(reader, delimiter);
+	let (rows, col_widths) = parse_file(&mut csv_reader, true)?;
 
-	let mut csv_reader = csv::ReaderBuilder::new()
+	let row_total_length = get_row_total_length(&col_widths);
+	let mut rows_iter = rows.iter();
+	let mut has_data = false;
+	if let Some(first_row) = rows_iter.next() {
+		print_line_row(&col_widths, row_total_length);
+		print_row(first_row, &col_widths, row_total_length);
+		has_data = true;
+		if has_header {
+			print_line_row(&col_widths, row_total_length);
+		}
+	}
+	for row in rows_iter {
+		print_row(row, &col_widths, row_total_length);
+	}
+
+	if has_data {
+		print_line_row(&col_widths, row_total_length);
+	}
+
+	Ok(())
+}
+
+fn parse_big_file(reader: BufReader<File>, delimiter: u8, has_header: bool) -> Res<()> {
+	let mut csv_reader = get_csv_reader(reader, delimiter);
+	let (_, col_widths) = parse_file(&mut csv_reader, false)?;
+	csv_reader.seek(Position::new())?;
+
+	let row_total_length = get_row_total_length(&col_widths);
+	let mut rows_iter = csv_reader.records();
+	let mut has_data = false;
+	if let Some(first_row) = rows_iter.next() {
+		let first_row = first_row?;
+		print_line_row(&col_widths, row_total_length);
+		print_row(&first_row, &col_widths, row_total_length);
+		has_data = true;
+		if has_header {
+			print_line_row(&col_widths, row_total_length);
+		}
+	}
+
+	for row in rows_iter {
+		let row = row?;
+		print_row(&row, &col_widths, row_total_length);
+	}
+
+	if has_data {
+		print_line_row(&col_widths, row_total_length);
+	}
+
+	Ok(())
+}
+
+fn get_csv_reader<R: Read>(reader: R, delimiter: u8) -> Reader<R> {
+	csv::ReaderBuilder::new()
 		.has_headers(false)
 		.delimiter(delimiter)
 		.flexible(true)
-		.from_reader(reader);
+		.from_reader(reader)
+}
 
+fn parse_file<R: Read>(csv_reader: &mut Reader<R>, save_rows: bool) -> Res<(Vec<StringRecord>, Vec<usize>)> {
 	let mut col_widths = Vec::new();
 	let mut rows = vec![];
 	for result in csv_reader.records() {
@@ -79,32 +136,12 @@ fn parse_small_file(path: &PathBuf, delimiter: u8, has_header: bool) -> Res<()> 
 			}
 		}
 
-		rows.push(row);
-	}
-
-	let row_total_length = get_row_total_length(&col_widths);
-	let mut rows_iter = rows.iter();
-	print_line_row(&col_widths, row_total_length);
-	if has_header {
-		if let Some(first_row) = rows_iter.next() {
-			print_row(first_row, &col_widths, row_total_length);
+		if save_rows {
+			rows.push(row);
 		}
-		print_line_row(&col_widths, row_total_length);
 	}
-	for row in rows_iter {
-		print_row(row, &col_widths, row_total_length);
-	}
-	print_line_row(&col_widths, row_total_length);
 
-	Ok(())
-}
-
-fn parse_big_file(path: &PathBuf, delimiter: u8) -> Res<()> {
-	todo!()
-}
-
-fn parse_stdin(delimiter: u8) -> Res<()> {
-	todo!()
+	Ok((rows, col_widths))
 }
 
 fn get_delimiter_u8(delimiter: Option<char>) -> Res<u8> {

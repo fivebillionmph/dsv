@@ -1,1 +1,1 @@
-pub mod page;
+pub mod cat;

@@ -2,6 +2,8 @@ mod cli;
 mod commands;
 mod error;
 
+use std::io::Write as _;
+
 use clap::Parser;
 
 fn main() {
@@ -16,7 +18,19 @@ fn main() {
 	match command_result {
 		Ok(_) => (),
 		Err(e) => {
-			eprintln!("{e}");
+			let mut silent_error = false;
+			if let Some(et) = e.downcast_ref::<std::io::Error>() {
+				match et.kind() {
+					std::io::ErrorKind::BrokenPipe => {
+						silent_error = true;
+					},
+					_ => (),
+				}
+			}
+
+			if !silent_error {
+				let _ = writeln!(&mut std::io::stderr(), "{}", e);
+			}
 		}
 	}
 }

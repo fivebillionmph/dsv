@@ -1,4 +1,4 @@
-use std::{fs::{self, File}, io::{self, BufReader, Read}, path::PathBuf, str::FromStr};
+use std::{fs::{self, File}, io::{self, BufReader, Read, Write as _}, path::PathBuf, str::FromStr};
 
 use anyhow::Result as Res;
 use csv::{Position, Reader, StringRecord};
@@ -64,19 +64,19 @@ fn parse_small_file<R: Read>(reader: R, delimiter: u8, has_header: bool) -> Res<
 	let mut rows_iter = rows.iter();
 	let mut has_data = false;
 	if let Some(first_row) = rows_iter.next() {
-		print_line_row(&col_widths, row_total_length);
-		print_row(first_row, &col_widths, row_total_length);
+		print_line_row(&col_widths, row_total_length)?;
+		print_row(first_row, &col_widths, row_total_length)?;
 		has_data = true;
 		if has_header {
-			print_line_row(&col_widths, row_total_length);
+			print_line_row(&col_widths, row_total_length)?;
 		}
 	}
 	for row in rows_iter {
-		print_row(row, &col_widths, row_total_length);
+		print_row(row, &col_widths, row_total_length)?;
 	}
 
 	if has_data {
-		print_line_row(&col_widths, row_total_length);
+		print_line_row(&col_widths, row_total_length)?;
 	}
 
 	Ok(())
@@ -92,21 +92,21 @@ fn parse_big_file(reader: BufReader<File>, delimiter: u8, has_header: bool) -> R
 	let mut has_data = false;
 	if let Some(first_row) = rows_iter.next() {
 		let first_row = first_row?;
-		print_line_row(&col_widths, row_total_length);
-		print_row(&first_row, &col_widths, row_total_length);
+		print_line_row(&col_widths, row_total_length)?;
+		print_row(&first_row, &col_widths, row_total_length)?;
 		has_data = true;
 		if has_header {
-			print_line_row(&col_widths, row_total_length);
+			print_line_row(&col_widths, row_total_length)?;
 		}
 	}
 
 	for row in rows_iter {
 		let row = row?;
-		print_row(&row, &col_widths, row_total_length);
+		print_row(&row, &col_widths, row_total_length)?;
 	}
 
 	if has_data {
-		print_line_row(&col_widths, row_total_length);
+		print_line_row(&col_widths, row_total_length)?;
 	}
 
 	Ok(())
@@ -152,7 +152,7 @@ fn get_delimiter_u8(delimiter: Option<char>) -> Res<u8> {
 	Ok(delimiter.try_into()?)
 }
 
-fn print_row(row: &StringRecord, col_widths: &Vec<usize>, capacity: usize) {
+fn print_row(row: &StringRecord, col_widths: &Vec<usize>, capacity: usize) -> Res<()> {
 	let mut row_string = String::with_capacity(capacity);
 	for (i, col_width) in col_widths.iter().enumerate() {
 		row_string += "| ";
@@ -173,17 +173,19 @@ fn print_row(row: &StringRecord, col_widths: &Vec<usize>, capacity: usize) {
 		row_string += " ";
 	}
 	row_string += "|";
-	println!("{}", row_string);
+	writeln!(&mut std::io::stdout(), "{}", row_string)?;
+	Ok(())
 }
 
-fn print_line_row(col_widths: &Vec<usize>, capacity: usize) {
+fn print_line_row(col_widths: &Vec<usize>, capacity: usize) -> Res<()> {
 	let mut row_string = String::with_capacity(capacity);
 	for col_width in col_widths {
 		row_string += "+";
 		row_string += "-".repeat(*col_width + 2).as_str();
 	}
 	row_string += "+";
-	println!("{}", row_string);
+	writeln!(&mut std::io::stdout(), "{}", row_string)?;
+	Ok(())
 }
 
 fn get_row_total_length(col_widths: &Vec<usize>) -> usize {

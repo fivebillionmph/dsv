@@ -2,6 +2,7 @@ use std::{fs::{self, File}, io::{self, BufReader, Read, Write as _}, path::PathB
 
 use anyhow::Result as Res;
 use csv::{Position, Reader, StringRecord};
+use unicode_width::UnicodeWidthStr;
 
 use crate::error::AppError;
 
@@ -66,12 +67,16 @@ fn parse_small_file<R: Read>(reader: R, delimiter: u8, has_header: bool) -> Res<
 	if let Some(first_row) = rows_iter.next() {
 		print_line_row(&col_widths, row_total_length)?;
 		print_row(first_row, &col_widths, row_total_length)?;
-		has_data = true;
 		if has_header {
 			print_line_row(&col_widths, row_total_length)?;
+		} else {
+			has_data = true;
 		}
 	}
 	for row in rows_iter {
+		if !has_data {
+			has_data = true;
+		}
 		print_row(row, &col_widths, row_total_length)?;
 	}
 
@@ -94,13 +99,17 @@ fn parse_big_file(reader: BufReader<File>, delimiter: u8, has_header: bool) -> R
 		let first_row = first_row?;
 		print_line_row(&col_widths, row_total_length)?;
 		print_row(&first_row, &col_widths, row_total_length)?;
-		has_data = true;
 		if has_header {
 			print_line_row(&col_widths, row_total_length)?;
+		} else {
+			has_data = true;
 		}
 	}
 
 	for row in rows_iter {
+		if !has_data {
+			has_data = true;
+		}
 		let row = row?;
 		print_row(&row, &col_widths, row_total_length)?;
 	}
@@ -130,8 +139,9 @@ fn parse_file<R: Read>(csv_reader: &mut Reader<R>, save_rows: bool) -> Res<(Vec<
 		}
 		for (i, col) in row.iter().enumerate() {
 			if let Some(this_col_width) = col_widths.get_mut(i) {
-				if *this_col_width < col.len() {
-					*this_col_width = col.len();
+				let col_width = col.width_cjk();
+				if *this_col_width < col_width {
+					*this_col_width = col_width;
 				}
 			}
 		}

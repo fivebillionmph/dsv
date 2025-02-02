@@ -1,21 +1,17 @@
 mod cli;
-mod commands;
+mod app;
 mod error;
+mod fields_subset;
+mod read_iterator;
 
 use std::io::Write as _;
 
-use clap::Parser;
+use anyhow::Result as Res;
 
 fn main() {
-	let args = cli::Cli::parse();
+	let app_result = run();
 
-	let command_result = match args.command {
-		cli::Commands::Cat { filename, delimiter, no_header } => {
-			commands::cat::run(&filename, &delimiter, no_header)
-		}
-	};
-
-	match command_result {
+	match app_result {
 		Ok(_) => (),
 		Err(e) => {
 			let mut silent_error = false;
@@ -33,4 +29,11 @@ fn main() {
 			}
 		}
 	}
+}
+
+fn run() -> Res<()> {
+	let (filename, delimiter, run_options) = cli::get_run_options()?;
+	app::run(&filename, &delimiter, &run_options)?;
+
+	Ok(())
 }

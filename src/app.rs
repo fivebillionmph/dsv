@@ -3,7 +3,7 @@ use std::{fs::{self, File}, io::{self, BufReader, Read, Write as _}, path::PathB
 use anyhow::Result as Res;
 use csv::{Position, Reader, StringRecord};
 
-use crate::{cli::{OutputFormat, RunOptions}, error::AppError, fields_subset::FieldsSubset, read_iterator::ReadIterator};
+use crate::{cli::{OutputFormat, RunOptions}, error::AppError, fields_subset::{FieldsSubset, FileData}, read_iterator::ReadIterator};
 
 const BIG_FILE_LIMIT: u64 = 100 * 1024 * 1024; // 100 MB
 const DEFAULT_DELIMITER: char = '\t';
@@ -13,7 +13,7 @@ pub fn run(filename_option: &Option<String>, passed_delimiter: &Option<char>, ru
 
 	match run_options.output_format {
 		OutputFormat::Table => {
-			run_print_table(filename_option, delimiter, run_options.has_header)
+			run_print_table(filename_option, delimiter, run_options)
 		}
 		OutputFormat::Delimited(d) => {
 unimplemented!()
@@ -21,9 +21,9 @@ unimplemented!()
 	}
 }
 
-fn run_print_table(filename_option: &Option<String>, delimiter: u8, has_header: bool) -> Res<()> {
+fn run_print_table(filename_option: &Option<String>, delimiter: u8, run_options: &RunOptions) -> Res<()> {
 	// Parse the table to get iterator and printing info
-	let (mut rows_iter, col_widths) = if let Some(filename) = filename_option {
+	let (mut rows_iter, col_widths, fields_file_data) = if let Some(filename) = filename_option {
 		let path = PathBuf::from_str(&filename)?;
 		if !path.exists() {
 			return Err(AppError::new(&format!("File doesn't exist: {}", filename)).into());
@@ -34,27 +34,29 @@ fn run_print_table(filename_option: &Option<String>, delimiter: u8, has_header: 
 		let file_size = fs::metadata(&path)?.len();
 		let mut csv_reader = get_csv_reader(reader, delimiter);
 		let is_big_file = file_size > BIG_FILE_LIMIT;
-		let (rows, col_widths) = parse_file(&mut csv_reader, !is_big_file)?;
-		if is_big_file {
+		let (rows, col_widths, file_data) = parse_file(&mut csv_reader, !is_big_file, &run_options.fields_subset)?;
+		let iterator = if is_big_file {
 			csv_reader.seek(Position::new())?;
-			(ReadIterator::new_from_csv_reader(csv_reader), col_widths)
+			ReadIterator::new_from_csv_reader(csv_reader)
 		} else {
-			(ReadIterator::new_from_vec(rows), col_widths)
-		}
+			ReadIterator::new_from_vec(rows)
+		};
+		(iterator, col_widths, file_data)
 	} else {
 		let mut csv_reader = get_csv_reader(io::stdin(), delimiter);
-		let (rows, col_widths) = parse_file(&mut csv_reader, true)?;
-		(ReadIterator::new_from_vec(rows), col_widths)
+		let (rows, col_widths, file_data) = parse_file(&mut csv_reader, true, &run_options.fields_subset)?;
+		(ReadIterator::new_from_vec(rows), col_widths, file_data)
 	};
 
 	// Run through the iterator to print each row
 	let mut has_data = false;
 	let row_total_length = get_table_row_total_length(&col_widths);
+	let col_widths = run_options.fields_subset.transform_col_widths(&fields_file_data, col_widths);
 	if let Some(first_row) = rows_iter.next() {
 		print_table_line_row(&col_widths, row_total_length)?;
-		let first_row = first_row?;
+		let first_row = run_options.fields_subset.transform_row(&fields_file_data, first_row?);
 		print_table_row(&first_row, &col_widths, row_total_length)?;
-		if has_header {
+		if run_options.has_header {
 			print_table_line_row(&col_widths, row_total_length)?;
 		} else {
 			has_data = true;
@@ -64,7 +66,7 @@ fn run_print_table(filename_option: &Option<String>, delimiter: u8, has_header: 
 		if !has_data {
 			has_data = true;
 		}
-		let row = row?;
+		let row = run_options.fields_subset.transform_row(&fields_file_data, row?);
 		print_table_row(&row, &col_widths, row_total_length)?;
 	}
 
@@ -108,11 +110,19 @@ fn get_csv_reader<R: Read>(reader: R, delimiter: u8) -> Reader<R> {
 }
 
 // Have the first element returned be a custom iterator that returns Result<StringRecord>
-fn parse_file<R: Read>(csv_reader: &mut Reader<R>, save_rows: bool) -> Res<(Vec<StringRecord>, Vec<usize>)> {
+fn parse_file<R: Read>(csv_reader: &mut Reader<R>, save_rows: bool, fields_subset: &FieldsSubset) -> Res<(Vec<StringRecord>, Vec<usize>, FileData)> {
 	let mut col_widths = Vec::new();
 	let mut rows = vec![];
-	for result in csv_reader.records() {
-		let row = result?;
+	let mut is_first_row = true;
+	let mut fields_file_data = fields_subset.generate_file_data();
+	for row in csv_reader.records() {
+		let row = row?;
+
+		fields_subset.set_from_row(&mut fields_file_data, &row, is_first_row)?;
+		if is_first_row {
+			is_first_row = false;
+		}
+
 		while col_widths.len() < row.len() {
 			col_widths.push(0);
 		}
@@ -131,7 +141,7 @@ fn parse_file<R: Read>(csv_reader: &mut Reader<R>, save_rows: bool) -> Res<(Vec<
 		}
 	}
 
-	Ok((rows, col_widths))
+	Ok((rows, col_widths, fields_file_data))
 }
 
 fn print_table_row(row: &StringRecord, col_widths: &Vec<usize>, capacity: usize) -> Res<()> {

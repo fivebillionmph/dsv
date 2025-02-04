@@ -58,7 +58,7 @@ impl RunOptions {
 
 		Ok(Self {
 			has_header: !args.no_header,
-			fields_subset:FieldsSubset::new(&args.number_fields, &args.named_fields)?,
+			fields_subset: FieldsSubset::new(&args.number_fields, &args.named_fields)?,
 			output_format: output_format,
 		})
 	}

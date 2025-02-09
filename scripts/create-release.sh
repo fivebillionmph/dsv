@@ -2,7 +2,9 @@
 
 cd "$(dirname "$0")/.."
 
-cargo build --release
+rm -r target/release 2> /dev/null
+# docker run --rm -v "$PWD":/app -w /app rust:latest cargo build --release # Don't use docker for now
+RUSTFLAGS="--remap-path-prefix /home/$(whoami)=/app" cargo build --release
 
 rm -r build/dsv 2> /dev/null
 rm build/dsv.tar.gz 2> /dev/null

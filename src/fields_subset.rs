@@ -25,6 +25,10 @@ impl FieldsSubset {
 		})
 	}
 
+	pub fn is_none(&self) -> bool {
+		self.field_kind.is_none()
+	}
+
 	pub fn generate_file_data(&self) -> FileData {
 		let mut file_data = FileData::default();
 		match &self.field_kind {
